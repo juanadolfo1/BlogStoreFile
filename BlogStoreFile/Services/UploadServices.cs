@@ -18,101 +18,72 @@ namespace BlogStoreFile.Services
             _containerClient = blobServiceClient.GetBlobContainerClient(containerName);
         }
 
-        /*    public async Task UploadZipContentsAsync(Stream zipStream)
+        public async Task<(string summaryMessage, int processedCount, int failedCount)> UploadZipContentsAsync(Stream zipStream)
+        {
+            if (zipStream == null || zipStream.Length == 0)
+            {
+                throw new ArgumentException("El flujo de datos proporcionado está vacío o no es válido.");
+            }
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            try
             {
                 using var memStream = new MemoryStream();
-                await zipStream.CopyToAsync(memStream);
+                await zipStream.CopyToAsync(memStream).ConfigureAwait(false);
                 memStream.Position = 0;
 
                 using var archive = new ZipArchive(memStream, ZipArchiveMode.Read);
 
-                var uploadTasks = new List<Task>();
-                int maxParallelism = 20;
+                var entries = archive.Entries
+                    .Where(entry => !string.IsNullOrEmpty(entry.Name))
+                    .ToList();
 
-                using var semaphore = new SemaphoreSlim(maxParallelism);
+                int totalEntries = entries.Count;
 
-                foreach (var entry in archive.Entries)
+                var options = new ParallelOptions
                 {
-                    if (string.IsNullOrEmpty(entry.Name))
-                        continue;
+                    MaxDegreeOfParallelism = 30
+                };
 
-                    await semaphore.WaitAsync();
-
-                    uploadTasks.Add(Task.Run(async () =>
+                await Parallel.ForEachAsync(entries, options, async (entry, cancellationToken) =>
+                {
+                    try
                     {
-                        try
-                        {
-                            using var entryStream = entry.Open();
-                            using var ms = new MemoryStream();
-                            await entryStream.CopyToAsync(ms);
-                            ms.Position = 0;
+                        await using var entryStream = entry.Open();
+                        await using var ms = new MemoryStream();
+                        await entryStream.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+                        ms.Position = 0;
 
-                            string blobPath = entry.FullName.Replace("\\", "/");
-                            var blobClient = _containerClient.GetBlobClient(blobPath);
+                        string blobPath = entry.FullName.Replace("\\", "/");
+                        var blobClient = _containerClient.GetBlobClient(blobPath);
 
-                            await blobClient.UploadAsync(ms, overwrite: true);
-                            Console.WriteLine($"Uploaded: {blobPath}");
-                        }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }));
-                }
+                        await blobClient.UploadAsync(ms, overwrite: true, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-                await Task.WhenAll(uploadTasks);
+                        Interlocked.Increment(ref processedCount);
+                    }
+                    catch (Exception)
+                    {
+                        Interlocked.Increment(ref failedCount);
+                    }
+                });
+
+                // Generar el mensaje de resumen
+                string summaryMessage = $"[INFO] Archivos procesados: {processedCount} de {totalEntries}\n" +
+                                        $"[INFO] Archivos fallidos: {failedCount} de {totalEntries}";
+
+                return (summaryMessage, processedCount, failedCount);
             }
-    /*/
-        public async Task UploadZipContentsAsync(Stream zipStream)
-        {
-            using var memStream = new MemoryStream();
-            await zipStream.CopyToAsync(memStream).ConfigureAwait(false);
-            memStream.Position = 0;
-
-            long zipSizeInBytes = memStream.Length;
-            Console.WriteLine($"[INFO] Tamaño total del ZIP: {zipSizeInBytes / (1024.0 * 1024):F2} MB");
-
-            using var archive = new ZipArchive(memStream, ZipArchiveMode.Read);
-
-            var entries = archive.Entries
-                .Where(entry => !string.IsNullOrEmpty(entry.Name))
-                .ToList();
-
-            int totalEntries = entries.Count;
-            Console.WriteLine($"[INFO] Total de archivos a procesar: {totalEntries}");
-
-            var options = new ParallelOptions
+            catch (InvalidDataException ex)
             {
-                MaxDegreeOfParallelism = 20
-            };
-
-            int processedCount = 0;
-
-            await Parallel.ForEachAsync(entries, options, async (entry, cancellationToken) =>
+                return ("ZIP upload failed due to invalid data.", 0, 1);
+            }
+            catch (Exception)
             {
-                int current = Interlocked.Increment(ref processedCount);
-
-                try
-                {
-                    await using var entryStream = entry.Open();
-                    await using var ms = new MemoryStream();
-                    await entryStream.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
-                    ms.Position = 0;
-
-                    string blobPath = entry.FullName.Replace("\\", "/");
-                    var blobClient = _containerClient.GetBlobClient(blobPath);
-
-                    await blobClient.UploadAsync(ms, overwrite: true, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                    Console.WriteLine($"[OK] ({current}/{totalEntries}) Subido: {blobPath}");
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"[ERROR] ({current}/{totalEntries}) Error al subir '{entry.FullName}': {ex.Message}");
-                }
-            });
-
-            Console.WriteLine("[INFO] Proceso de subida finalizado.");
+                return ("ZIP upload failed due to an unexpected error.", 0, 1);
+            }
         }
+
     }
 }

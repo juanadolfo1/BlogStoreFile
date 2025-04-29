@@ -10,24 +10,34 @@ namespace BlogStoreFile.Controllers
 
         private readonly UploadServices _blobZipUploader;
 
-        public UploadController( UploadServices blobZipUploader)
+        public UploadController(UploadServices blobZipUploader)
         {
             _blobZipUploader = blobZipUploader;
         }
 
         [HttpPost("upload-zip")]
         [DisableRequestSizeLimit]
-        public async Task<IActionResult> UploadZip(IFormFile file)
+        public async Task<IActionResult> UploadZipAsync(IFormFile zipFile)
         {
-            if (file == null || file.Length == 0)
+            if (zipFile == null || zipFile.Length == 0)
             {
-                return BadRequest("No file uploaded.");
+                return BadRequest("No se ha seleccionado un archivo ZIP.");
             }
 
-            using var stream = file.OpenReadStream();
-            await _blobZipUploader.UploadZipContentsAsync(stream);
+            using (var stream = zipFile.OpenReadStream())
+            {
+                var (summaryMessage, processedCount, failedCount) = await _blobZipUploader.UploadZipContentsAsync(stream);
 
-            return Ok("ZIP uploaded and files extracted successfully.");
+                var result = new
+                {
+                    message = summaryMessage,  
+                    processedFiles = processedCount,
+                    failedFiles = failedCount
+                };
+
+              
+                return Ok(result);
+            }
         }
     }
 }
