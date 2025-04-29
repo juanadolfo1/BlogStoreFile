@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using BlogStoreFile.Services;
 
 namespace BlogStoreFile.Controllers
 {
@@ -6,14 +7,16 @@ namespace BlogStoreFile.Controllers
     [Route("api/[controller]")]
     public class UploadController : ControllerBase
     {
-        // private readonly  _uploader;
 
-        public UploadController(BlobZipUploader uploader)
+        private readonly UploadServices _blobZipUploader;
+
+        public UploadController( UploadServices blobZipUploader)
         {
-            _uploader = uploader;
+            _blobZipUploader = blobZipUploader;
         }
 
         [HttpPost("upload-zip")]
+        [DisableRequestSizeLimit]
         public async Task<IActionResult> UploadZip(IFormFile file)
         {
             if (file == null || file.Length == 0)
@@ -22,10 +25,10 @@ namespace BlogStoreFile.Controllers
             }
 
             using var stream = file.OpenReadStream();
-            await _uploader.UploadZipContentsAsync(stream);
+            await _blobZipUploader.UploadZipContentsAsync(stream);
 
-            return Ok("ZIP uploaded and extracted successfully.");
+            return Ok("ZIP uploaded and files extracted successfully.");
         }
-
     }
 }
+
