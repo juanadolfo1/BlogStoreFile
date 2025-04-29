@@ -8,11 +8,18 @@ namespace BlogStoreFile.Services
     public class UploadServices
     {
         private readonly BlobContainerClient _containerClient;
-
+        private readonly int _maxDegree;
         public UploadServices(IConfiguration configuration)
         {
-            string connectionString = configuration.GetConnectionString("AzureBlobStorage");
-            string containerName = configuration.GetValue<string>("BlobContainerName");
+
+            string connectionString = configuration.GetConnectionString("AzureBlobStorage")
+                                      ?? throw new InvalidOperationException("Missing 'AzureBlobStorage' connection string.");
+
+            string containerName = configuration.GetValue<string>("BlobContainerName")
+                                   ?? throw new InvalidOperationException("Missing 'BlobContainerName' configuration.");
+
+
+            _maxDegree = configuration.GetValue<int>("ParallelConfig:MaxDegreeOfParallelism");
 
             var blobServiceClient = new BlobServiceClient(connectionString);
             _containerClient = blobServiceClient.GetBlobContainerClient(containerName);
@@ -44,7 +51,7 @@ namespace BlogStoreFile.Services
 
                 var options = new ParallelOptions
                 {
-                    MaxDegreeOfParallelism = 30
+                    MaxDegreeOfParallelism = _maxDegree
                 };
 
                 await Parallel.ForEachAsync(entries, options, async (entry, cancellationToken) =>
@@ -69,7 +76,7 @@ namespace BlogStoreFile.Services
                     }
                 });
 
-                // Generar el mensaje de resumen
+
                 string summaryMessage = $"[INFO] Archivos procesados: {processedCount} de {totalEntries}\n" +
                                         $"[INFO] Archivos fallidos: {failedCount} de {totalEntries}";
 
@@ -77,10 +84,12 @@ namespace BlogStoreFile.Services
             }
             catch (InvalidDataException ex)
             {
+                Console.WriteLine($"[ERROR] El archivo ZIP es inválido o está corrupto: {ex.Message}");
                 return ("ZIP upload failed due to invalid data.", 0, 1);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"[ERROR] Error inesperado durante la carga del ZIP: {ex.Message}");
                 return ("ZIP upload failed due to an unexpected error.", 0, 1);
             }
         }
